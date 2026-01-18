@@ -1,5 +1,5 @@
 // TwinType Background Service Worker
-// Manages tab discovery and explicit messaging
+// Manages tab discovery and messaging
 
 const PROVIDER_PATTERNS = {
   chatgpt: /^https:\/\/chatgpt\.com\/.*/,
@@ -7,7 +7,6 @@ const PROVIDER_PATTERNS = {
   claude: /^https:\/\/claude\.ai\/.*/
 };
 
-// Logging helper
 function log(message, data = null) {
   const timestamp = new Date().toISOString().substr(11, 12);
   if (data) {
@@ -18,19 +17,18 @@ function log(message, data = null) {
 }
 
 // Initialize side panel behavior
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => { });
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
 // Handle keyboard shortcut
 chrome.commands.onCommand.addListener(async (command) => {
-  if (command === '_execute_action') {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.windowId) {
-      chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => { });
-    }
+  if (command !== '_execute_action') return;
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.windowId) {
+    chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
   }
 });
 
-// Detect provider from URL
 function getProvider(url) {
   if (!url) return null;
   for (const [provider, pattern] of Object.entries(PROVIDER_PATTERNS)) {
@@ -39,7 +37,6 @@ function getProvider(url) {
   return null;
 }
 
-// Get ALL eligible tabs across all windows
 async function getEligibleTabs() {
   try {
     const windows = await chrome.windows.getAll({ populate: true, windowTypes: ['normal'] });
@@ -55,7 +52,7 @@ async function getEligibleTabs() {
             provider,
             title: tab.title || 'Untitled',
             url: tab.url,
-            active: tab.active // useful for UI hints
+            active: tab.active
           });
         }
       }
@@ -67,10 +64,26 @@ async function getEligibleTabs() {
   }
 }
 
-// Ping a specific tab
+async function injectContentScript(tabId, url) {
+  const provider = getProvider(url);
+  if (!provider) return false;
+
+  try {
+    log(`Injecting content script for tab ${tabId}`);
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: [`content/shared.js`, `content/${provider}.js`]
+    });
+    await new Promise(r => setTimeout(r, 50));
+    return true;
+  } catch (e) {
+    log(`Injection failed: ${e.message}`);
+    return false;
+  }
+}
+
 async function pingTab(tabId, tabUrl, retry = true) {
   try {
-    // Basic PING
     const response = await chrome.tabs.sendMessage(tabId, { type: 'PING' });
 
     if (response?.ok === true) {
@@ -78,93 +91,81 @@ async function pingTab(tabId, tabUrl, retry = true) {
         ready: response.composerReady === true,
         reason: response.composerReady ? null : (response.reason || 'composer not found')
       };
-    } else {
-      return { ready: false, reason: response?.reason || 'content script error' };
     }
+    return { ready: false, reason: response?.reason || 'content script error' };
   } catch (err) {
     log(`Ping failed for tab ${tabId}:`, err.message);
 
     // Auto-injection fallback
     if (retry && err.message.includes('Could not establish connection')) {
-      return await injectAndRetryPing(tabId, tabUrl);
+      const injected = await injectContentScript(tabId, tabUrl);
+      if (injected) {
+        return pingTab(tabId, tabUrl, false);
+      }
+      return { ready: false, reason: 'injection failed' };
     }
 
-    let reason = 'no receiver';
     if (err.message.includes('Extension context invalidated')) {
-      reason = 'extension reloaded';
-    } else if (err.message.includes('Cannot access')) {
-      reason = 'permission denied';
+      return { ready: false, reason: 'extension reloaded' };
     }
-    return { ready: false, reason };
+    if (err.message.includes('Cannot access')) {
+      return { ready: false, reason: 'permission denied' };
+    }
+    return { ready: false, reason: 'no receiver' };
   }
 }
 
-// Auto-injection helper
-async function injectAndRetryPing(tabId, url) {
-  log(`Attempting auto-injection for tab ${tabId}`);
-  const provider = getProvider(url);
-  if (!provider) return { ready: false, reason: 'unknown provider' };
-
+async function setTextInTab(tabId, tabUrl, text) {
   try {
-    const file = `content/${provider}.js`;
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: [file]
-    });
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'SET_TEXT', text });
+    return { ok: response?.ok, error: response?.error };
+  } catch (err) {
+    // Auto-inject on connection error
+    if (err.message.includes('Could not establish connection')) {
+      const injected = await injectContentScript(tabId, tabUrl);
+      if (injected) {
+        try {
+          const response = await chrome.tabs.sendMessage(tabId, { type: 'SET_TEXT', text });
+          return { ok: response?.ok, error: response?.error };
+        } catch (e) {
+          return { ok: false, error: e.message };
+        }
+      }
+      return { ok: false, error: 'no receiver (injection failed)' };
+    }
+    return { ok: false, error: err.message };
+  }
+}
 
-    // Tiny delay to let script initialize
-    await new Promise(r => setTimeout(r, 50));
-    return await pingTab(tabId, url, false);
-  } catch (e) {
-    log(`Injection failed: ${e.message}`);
-    return { ready: false, reason: 'injection failed' };
+async function sendCommandToTab(tabId) {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'SEND' });
+    return { ok: response?.ok, error: response?.error };
+  } catch (err) {
+    return { ok: false, error: err.message };
   }
 }
 
 // Message handling
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // 1. Get List of Eligible Tabs
-  if (message.type === 'GET_ELIGIBLE_TABS') {
-    getEligibleTabs().then(tabs => sendResponse({ tabs }));
-    return true;
-  }
+  switch (message.type) {
+    case 'GET_ELIGIBLE_TABS':
+      getEligibleTabs().then(tabs => sendResponse({ tabs }));
+      return true;
 
-  // 2. Ping specific tab
-  if (message.type === 'PING_TAB') {
-    pingTab(message.tabId, message.tabUrl).then(result => sendResponse(result));
-    return true;
-  }
+    case 'PING_TAB':
+      pingTab(message.tabId, message.tabUrl).then(sendResponse);
+      return true;
 
-  // 3. Set Text in specific tab
-  if (message.type === 'SET_TEXT') {
-    chrome.tabs.sendMessage(message.tabId, { type: 'SET_TEXT', text: message.text })
-      .then(response => sendResponse({ ok: response?.ok, error: response?.error }))
-      .catch(err => {
-        // If "no receiver", try inject and retry once
-        if (err.message.includes('Could not establish connection')) {
-          injectAndRetryPing(message.tabId, message.tabUrl).then(pingRes => {
-            if (pingRes.ready) {
-              // Retry the SET_TEXT
-              chrome.tabs.sendMessage(message.tabId, { type: 'SET_TEXT', text: message.text })
-                .then(r => sendResponse({ ok: r?.ok, error: r?.error }))
-                .catch(e => sendResponse({ ok: false, error: e.message }));
-            } else {
-              sendResponse({ ok: false, error: 'no receiver (injection failed)' });
-            }
-          });
-        } else {
-          sendResponse({ ok: false, error: err.message });
-        }
-      });
-    return true;
-  }
+    case 'SET_TEXT':
+      setTextInTab(message.tabId, message.tabUrl, message.text).then(sendResponse);
+      return true;
 
-  // 4. Send command to specific tab
-  if (message.type === 'SEND_COMMAND') {
-    chrome.tabs.sendMessage(message.tabId, { type: 'SEND' })
-      .then(response => sendResponse({ ok: response?.ok, error: response?.error }))
-      .catch(err => sendResponse({ ok: false, error: err.message }));
-    return true;
+    case 'SEND_COMMAND':
+      sendCommandToTab(message.tabId).then(sendResponse);
+      return true;
+
+    default:
+      return false;
   }
 });
-
