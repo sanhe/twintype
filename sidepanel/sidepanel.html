@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TwinType</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <h1>TwinType</h1>
+      </div>
+      <div class="header-controls">
+        <button id="themeToggle" class="icon-btn" title="Toggle theme">
+          <span class="icon-sun">☀️</span>
+          <span class="icon-moon">🌙</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Sync Toggle -->
+    <div class="sync-section">
+      <div class="toggle-row">
+        <label class="toggle-label">Live Sync</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="liveSyncToggle" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <p class="sync-hint" id="syncHint">Mirrors as you type</p>
+    </div>
+
+    <!-- Target Selection Section -->
+    <div class="status-section">
+      <div class="status-header">
+        <span>Active Targets</span>
+        <button id="refreshBtn" class="refresh-btn" title="Refresh tab list">↻</button>
+      </div>
+      
+      <div class="target-row">
+        <label class="target-label">Target A <span class="required-badge">Required</span></label>
+        <div class="select-wrapper">
+          <div class="status-dot-wrapper" id="statusDotA"></div>
+          <select id="selectTargetA" class="target-select">
+            <option value="">Loading...</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="target-row">
+        <label class="target-label">Target B <span class="optional-badge">Optional</span></label>
+        <div class="select-wrapper">
+          <div class="status-dot-wrapper" id="statusDotB"></div>
+          <select id="selectTargetB" class="target-select">
+            <option value="">None</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Diagnostics Section -->
+    <div class="diagnostics-section">
+      <button class="diagnostics-toggle" id="diagToggle">
+        <span class="diagnostics-arrow" id="diagArrow">▶</span>
+        <span>Diagnostics</span>
+      </button>
+      <div class="diagnostics-content" id="diagContent">
+        <div id="diagLog">No diagnostics yet</div>
+      </div>
+    </div>
+
+    <!-- Input Section -->
+    <div class="input-section">
+      <div class="textarea-wrapper">
+        <textarea
+          id="masterInput"
+          placeholder="Type here to mirror across all AI chats..."
+          rows="4"
+        ></textarea>
+        <div class="char-count" id="charCount">0</div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="action-buttons">
+        <button id="clearBtn" class="btn btn-secondary">Clear</button>
+        <button id="syncNowBtn" class="btn btn-secondary" style="display: none;">Sync Now</button>
+        <button id="sendBtn" class="btn btn-primary">
+          Send
+          <span class="btn-hint">↵</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
