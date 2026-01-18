@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Generate TwinType Icons</title>
+  <style>
+    body { font-family: system-ui; padding: 20px; background: #1a1a2e; color: white; }
+    canvas { border: 1px solid #333; margin: 10px; }
+    .icons { display: flex; gap: 20px; flex-wrap: wrap; }
+    .icon-box { text-align: center; }
+    a { color: #8a63ff; }
+    button { padding: 10px 20px; background: #8a63ff; color: white; border: none; border-radius: 8px; cursor: pointer; margin: 20px 0; }
+  </style>
+</head>
+<body>
+  <h1>TwinType Icon Generator</h1>
+  <p>Right-click each canvas and "Save image as..." to save the PNG icons.</p>
+  <div class="icons">
+    <div class="icon-box">
+      <canvas id="icon16" width="16" height="16"></canvas>
+      <p>icon16.png</p>
+    </div>
+    <div class="icon-box">
+      <canvas id="icon48" width="48" height="48"></canvas>
+      <p>icon48.png</p>
+    </div>
+    <div class="icon-box">
+      <canvas id="icon128" width="128" height="128"></canvas>
+      <p>icon128.png</p>
+    </div>
+  </div>
+  <button onclick="downloadAll()">Download All Icons</button>
+
+  <script>
+    function drawIcon(canvas) {
+      const ctx = canvas.getContext('2d');
+      const size = canvas.width;
+      const scale = size / 128;
+
+      // Background gradient
+      const gradient = ctx.createLinearGradient(0, 0, size, size);
+      gradient.addColorStop(0, '#8a63ff');
+      gradient.addColorStop(0.5, '#6366f1');
+      gradient.addColorStop(1, '#4f8cff');
+
+      // Rounded rectangle background
+      const radius = size * 0.2;
+      ctx.beginPath();
+      ctx.roundRect(0, 0, size, size, radius);
+      ctx.fillStyle = gradient;
+      ctx.fill();
+
+      // Lightning bolt icon
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+
+      const cx = size / 2;
+      const cy = size / 2;
+      const s = size * 0.35;
+
+      // Simple lightning bolt shape
+      ctx.moveTo(cx + s * 0.1, cy - s);
+      ctx.lineTo(cx - s * 0.4, cy + s * 0.1);
+      ctx.lineTo(cx - s * 0.05, cy + s * 0.1);
+      ctx.lineTo(cx - s * 0.15, cy + s);
+      ctx.lineTo(cx + s * 0.4, cy - s * 0.1);
+      ctx.lineTo(cx + s * 0.05, cy - s * 0.1);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Draw all icons
+    ['icon16', 'icon48', 'icon128'].forEach(id => {
+      drawIcon(document.getElementById(id));
+    });
+
+    function downloadAll() {
+      ['icon16', 'icon48', 'icon128'].forEach(id => {
+        const canvas = document.getElementById(id);
+        const link = document.createElement('a');
+        link.download = id + '.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      });
+    }
+  </script>
+</body>
+</html>
