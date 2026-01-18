@@ -121,11 +121,23 @@
     }
   }
 
+  function getComposerText() {
+    const composer = findComposer();
+    if (!composer) return '';
+
+    if (composer.tagName === 'TEXTAREA') {
+      return composer.value || '';
+    } else {
+      return composer.textContent || '';
+    }
+  }
+
   const script = createContentScript({
     provider: 'gemini',
     findComposer,
     setComposerText,
-    sendComposer
+    sendComposer,
+    getComposerText
   });
 
   script.init();

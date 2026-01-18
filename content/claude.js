@@ -172,11 +172,18 @@
     }
   }
 
+  function getComposerText() {
+    const composer = findComposer();
+    if (!composer) return '';
+    return composer.textContent || '';
+  }
+
   const script = createContentScript({
     provider: 'claude',
     findComposer,
     setComposerText,
-    sendComposer
+    sendComposer,
+    getComposerText
   });
 
   script.init();

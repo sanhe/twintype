@@ -7,6 +7,10 @@ const PROVIDER_PATTERNS = {
   claude: /^https:\/\/claude\.ai\/.*/
 };
 
+// Active tab tracking state
+let activeTabId = null;
+let lastActiveTargetTabId = null;
+
 function log(message, data = null) {
   const timestamp = new Date().toISOString().substr(11, 12);
   if (data) {
@@ -18,6 +22,36 @@ function log(message, data = null) {
 
 // Initialize side panel behavior
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+
+// Track active tab changes
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  activeTabId = activeInfo.tabId;
+  notifySidePanelOfActiveTab(activeInfo.tabId);
+});
+
+chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, windowId });
+    if (tab) {
+      activeTabId = tab.id;
+      notifySidePanelOfActiveTab(tab.id);
+    }
+  } catch (e) {
+    // Window may not exist
+  }
+});
+
+async function notifySidePanelOfActiveTab(tabId) {
+  try {
+    await chrome.runtime.sendMessage({
+      type: 'ACTIVE_TAB_CHANGED',
+      tabId
+    });
+  } catch (e) {
+    // Side panel may not be open
+  }
+}
 
 // Handle keyboard shortcut
 chrome.commands.onCommand.addListener(async (command) => {
@@ -146,6 +180,28 @@ async function sendCommandToTab(tabId) {
   }
 }
 
+async function getTextFromTab(tabId, tabUrl) {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'GET_TEXT' });
+    return { ok: response?.ok, text: response?.text || '', provider: response?.provider };
+  } catch (err) {
+    // Auto-inject on connection error
+    if (err.message.includes('Could not establish connection')) {
+      const injected = await injectContentScript(tabId, tabUrl);
+      if (injected) {
+        try {
+          const response = await chrome.tabs.sendMessage(tabId, { type: 'GET_TEXT' });
+          return { ok: response?.ok, text: response?.text || '', provider: response?.provider };
+        } catch (e) {
+          return { ok: false, text: '', error: e.message };
+        }
+      }
+      return { ok: false, text: '', error: 'injection failed' };
+    }
+    return { ok: false, text: '', error: err.message };
+  }
+}
+
 // Message handling
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.type) {
@@ -164,6 +220,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'SEND_COMMAND':
       sendCommandToTab(message.tabId).then(sendResponse);
       return true;
+
+    case 'GET_TEXT':
+      getTextFromTab(message.tabId, message.tabUrl).then(sendResponse);
+      return true;
+
+    case 'COMPOSER_CHANGED':
+      // Forward to side panel with tabId from sender
+      chrome.runtime.sendMessage({
+        type: 'ACTIVE_TARGET_TEXT',
+        tabId: sender.tab?.id,
+        provider: message.provider,
+        text: message.text,
+        title: sender.tab?.title || 'Unknown'
+      }).catch(() => {});
+      sendResponse({ ok: true });
+      return true;
+
+    case 'ACTIVE_TAB_CHANGED':
+    case 'ACTIVE_TARGET_TEXT':
+    case 'SIDEPANEL_CONNECT':
+      // These are handled by the side panel, not the service worker
+      return false;
 
     default:
       return false;

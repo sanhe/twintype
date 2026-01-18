@@ -130,16 +130,24 @@ function setTextareaValue(textarea, text) {
  * @param {function} config.findComposer - Function to find the composer element
  * @param {function} config.setComposerText - Function to set text in composer
  * @param {function} config.sendComposer - Function to send the message
+ * @param {function} config.getComposerText - Function to get text from composer
  * @returns {Object} Handler methods
  */
 function createContentScript(config) {
-  const { provider, findComposer, setComposerText, sendComposer } = config;
+  const { provider, findComposer, setComposerText, sendComposer, getComposerText } = config;
   const log = createLogger(provider);
 
   let composer = null;
   let observer = null;
   let observerDebounceTimer = null;
   let lastComposerFound = false;
+
+  // Reverse sync state
+  let suppressReverse = false;
+  let suppressTimer = null;
+  let inputListener = null;
+  let lastSentText = '';
+  const SUPPRESS_MS = 500;
 
   function checkComposerReady() {
     composer = findComposer();
@@ -148,9 +156,38 @@ function createContentScript(config) {
     if (found !== lastComposerFound) {
       log(found ? 'Composer found' : 'Composer lost');
       lastComposerFound = found;
+      if (found) {
+        attachInputListener();
+      }
     }
 
     return found;
+  }
+
+  function attachInputListener() {
+    if (!composer) return;
+
+    // Remove old listener if exists
+    if (inputListener && composer._twinTypeListener) {
+      composer.removeEventListener('input', composer._twinTypeListener);
+    }
+
+    inputListener = (e) => {
+      if (suppressReverse) return;
+
+      const text = getComposerText ? getComposerText() : '';
+      if (text === lastSentText) return;
+      lastSentText = text;
+
+      chrome.runtime.sendMessage({
+        type: 'COMPOSER_CHANGED',
+        provider,
+        text
+      }).catch(() => {});
+    };
+
+    composer._twinTypeListener = inputListener;
+    composer.addEventListener('input', inputListener);
   }
 
   function setupObserver() {
@@ -160,7 +197,10 @@ function createContentScript(config) {
 
     observer = new MutationObserver(() => {
       clearTimeout(observerDebounceTimer);
-      observerDebounceTimer = setTimeout(checkComposerReady, 100);
+      observerDebounceTimer = setTimeout(() => {
+        checkComposerReady();
+        attachInputListener();
+      }, 100);
     });
 
     observer.observe(document.body, {
@@ -185,12 +225,25 @@ function createContentScript(config) {
       }
 
       case 'SET_TEXT':
+        // Enable suppression to prevent reverse sync loop
+        suppressReverse = true;
+        clearTimeout(suppressTimer);
+        suppressTimer = setTimeout(() => {
+          suppressReverse = false;
+        }, SUPPRESS_MS);
+
         sendResponse(setComposerText(message.text));
         break;
 
       case 'SEND':
         sendResponse(sendComposer());
         break;
+
+      case 'GET_TEXT': {
+        const text = getComposerText ? getComposerText() : '';
+        sendResponse({ ok: true, text, provider });
+        break;
+      }
 
       default:
         sendResponse({ ok: false, error: 'Unknown message type' });
@@ -202,6 +255,7 @@ function createContentScript(config) {
     log('Content script loaded');
     setupObserver();
     checkComposerReady();
+    attachInputListener();
     chrome.runtime.onMessage.addListener(handleMessage);
   }
 

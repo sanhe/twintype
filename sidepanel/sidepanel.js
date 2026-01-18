@@ -19,7 +19,10 @@ const elements = {
   selectTargetA: document.getElementById('selectTargetA'),
   selectTargetB: document.getElementById('selectTargetB'),
   statusDotA: document.getElementById('statusDotA'),
-  statusDotB: document.getElementById('statusDotB')
+  statusDotB: document.getElementById('statusDotB'),
+  autoPullToggle: document.getElementById('autoPullToggle'),
+  autoPullHint: document.getElementById('autoPullHint'),
+  autoPullSource: document.getElementById('autoPullSource')
 };
 
 // State
@@ -28,7 +31,9 @@ const state = {
   selectedTargetA: null,
   selectedTargetB: null,
   diagnostics: [],
-  debounceTimer: null
+  debounceTimer: null,
+  activeTabId: null,
+  updatingFromChat: false
 };
 
 // Constants
@@ -41,7 +46,7 @@ async function init() {
     chrome.runtime.sendMessage({ type: 'SIDEPANEL_CONNECT' }).catch(() => {});
 
     const stored = await chrome.storage.local.get([
-      'liveSync', 'theme', 'inputText', 'selectedTargetA', 'selectedTargetB'
+      'liveSync', 'theme', 'inputText', 'selectedTargetA', 'selectedTargetB', 'autoPull'
     ]);
 
     // Apply theme
@@ -58,15 +63,25 @@ async function init() {
     elements.liveSyncToggle.checked = stored.liveSync !== false;
     updateSyncUI();
 
+    // Restore auto-pull state (default OFF)
+    elements.autoPullToggle.checked = stored.autoPull === true;
+    updateAutoPullUI();
+
     // Restore target selections
     if (stored.selectedTargetA) state.selectedTargetA = parseInt(stored.selectedTargetA);
     if (stored.selectedTargetB) state.selectedTargetB = parseInt(stored.selectedTargetB);
 
     await fetchAndPopulateTabs();
     setupEventListeners();
+    setupMessageListener();
 
     // Periodic status updates
     setInterval(updateTargetStatuses, 5000);
+
+    // Initial pull if auto-pull is on
+    if (elements.autoPullToggle.checked) {
+      pullFromActiveTarget();
+    }
   } catch (err) {
     console.error('Init failed:', err);
     addDiagnostic({ type: 'error', message: `Init error: ${err.message}` });
@@ -79,6 +94,8 @@ function setupEventListeners() {
 
   elements.masterInput.addEventListener('input', () => {
     updateCharCount();
+    // Skip sync if we're updating from chat to prevent loop
+    if (state.updatingFromChat) return;
     if (elements.liveSyncToggle.checked) {
       clearTimeout(state.debounceTimer);
       state.debounceTimer = setTimeout(syncText, DEBOUNCE_MS);
@@ -95,6 +112,14 @@ function setupEventListeners() {
   elements.liveSyncToggle.addEventListener('change', () => {
     chrome.storage.local.set({ liveSync: elements.liveSyncToggle.checked });
     updateSyncUI();
+  });
+
+  elements.autoPullToggle.addEventListener('change', () => {
+    chrome.storage.local.set({ autoPull: elements.autoPullToggle.checked });
+    updateAutoPullUI();
+    if (elements.autoPullToggle.checked) {
+      pullFromActiveTarget();
+    }
   });
 
   elements.syncNowBtn.addEventListener('click', syncText);
@@ -368,6 +393,109 @@ function cycleTheme() {
     document.body.classList.remove('dark');
     chrome.storage.local.remove('theme');
   }
+}
+
+function updateAutoPullUI() {
+  const isOn = elements.autoPullToggle.checked;
+  elements.autoPullHint.style.display = isOn ? 'block' : 'none';
+  if (!isOn) {
+    elements.autoPullSource.textContent = '—';
+  }
+}
+
+function isTargetTab(tabId) {
+  return tabId === state.selectedTargetA || tabId === state.selectedTargetB;
+}
+
+function getActiveTargetTabId() {
+  // If active tab is a target, use it
+  if (state.activeTabId && isTargetTab(state.activeTabId)) {
+    return state.activeTabId;
+  }
+  // Otherwise use Target A as fallback
+  return state.selectedTargetA || state.selectedTargetB || null;
+}
+
+async function pullFromActiveTarget() {
+  if (!elements.autoPullToggle.checked) return;
+
+  const tabId = getActiveTargetTabId();
+  if (!tabId) {
+    elements.autoPullSource.textContent = 'No target';
+    return;
+  }
+
+  const tabInfo = state.eligibleTabs.find(t => t.id === tabId);
+  if (!tabInfo) {
+    elements.autoPullSource.textContent = 'Target not found';
+    return;
+  }
+
+  try {
+    const res = await chrome.runtime.sendMessage({
+      type: 'GET_TEXT',
+      tabId,
+      tabUrl: tabInfo.url
+    });
+
+    if (res?.ok) {
+      const provider = tabInfo.provider.charAt(0).toUpperCase() + tabInfo.provider.slice(1);
+      const title = tabInfo.title.length > 20 ? tabInfo.title.substring(0, 20) + '...' : tabInfo.title;
+      elements.autoPullSource.textContent = `${provider} — ${title}`;
+
+      // Only update if there's text and it's different
+      if (res.text && res.text !== elements.masterInput.value) {
+        state.updatingFromChat = true;
+        elements.masterInput.value = res.text;
+        updateCharCount();
+        chrome.storage.local.set({ inputText: res.text });
+        state.updatingFromChat = false;
+      }
+    } else {
+      elements.autoPullSource.textContent = 'Not ready';
+    }
+  } catch (e) {
+    elements.autoPullSource.textContent = 'Error';
+  }
+}
+
+function setupMessageListener() {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'ACTIVE_TAB_CHANGED') {
+      state.activeTabId = message.tabId;
+      if (elements.autoPullToggle.checked && isTargetTab(message.tabId)) {
+        pullFromActiveTarget();
+      }
+      return false;
+    }
+
+    if (message.type === 'ACTIVE_TARGET_TEXT') {
+      if (!elements.autoPullToggle.checked) return false;
+
+      // Only accept updates from the active target
+      const activeTarget = getActiveTargetTabId();
+      if (message.tabId !== activeTarget) return false;
+
+      const tabInfo = state.eligibleTabs.find(t => t.id === message.tabId);
+      if (tabInfo) {
+        const provider = tabInfo.provider.charAt(0).toUpperCase() + tabInfo.provider.slice(1);
+        const title = tabInfo.title.length > 20 ? tabInfo.title.substring(0, 20) + '...' : tabInfo.title;
+        elements.autoPullSource.textContent = `${provider} — ${title}`;
+      }
+
+      // Update textarea without triggering sync back
+      if (message.text !== elements.masterInput.value) {
+        state.updatingFromChat = true;
+        elements.masterInput.value = message.text;
+        updateCharCount();
+        chrome.storage.local.set({ inputText: message.text });
+        state.updatingFromChat = false;
+      }
+      return false;
+    }
+
+    return false;
+  });
 }
 
 init();
