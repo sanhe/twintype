@@ -1,0 +1,31 @@
+{
+  "name": "twintype",
+  "version": "1.0.0",
+  "description": "Mirror your typing to ChatGPT, Gemini, and Claude simultaneously",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "collectCoverageFrom": [
+      "background/**/*.js",
+      "content/**/*.js",
+      "sidepanel/**/*.js",
+      "!**/*.test.js"
+    ],
+    "testMatch": [
+      "**/__tests__/**/*.test.js"
+    ],
+    "setupFiles": [
+      "./__tests__/setup.js"
+    ],
+    "clearMocks": true
+  }
+}

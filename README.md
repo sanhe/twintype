@@ -158,6 +158,38 @@ twintype/
 
 ## Development
 
+### Quick Start
+
+The project includes a Makefile for common tasks:
+
+```bash
+make help           # Show all available commands
+make install        # Install dependencies
+make test           # Run tests
+make test-watch     # Run tests in watch mode
+make test-coverage  # Generate coverage report
+make build          # Create extension package (twintype.zip)
+make check          # Run all checks
+make clean          # Remove generated files
+```
+
+### Testing
+
+The project has a comprehensive test suite with 61 tests:
+
+```bash
+# Run all tests
+npm test
+
+# Watch mode for development
+npm run test:watch
+
+# Generate coverage report
+npm run test:coverage
+```
+
+See [TEST.md](TEST.md) for detailed testing documentation.
+
 ### Debugging
 
 1. Open `chrome://extensions/`
@@ -176,6 +208,16 @@ After modifying files:
 2. Click the refresh icon on the TwinType card
 3. Close and reopen the side panel
 4. Refresh any open AI chat tabs
+
+### Building for Distribution
+
+Create a production-ready zip file:
+
+```bash
+make build
+```
+
+This creates `twintype.zip` containing only the essential extension files (excludes tests, development files, etc.).
 
 ## License
 

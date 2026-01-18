@@ -23,5 +23,13 @@ build/
 .env.local
 .env.*.local
 
+# Test coverage
+coverage/
+
 # Logs
 *.log
+
+# Local scripts
+merge-to-main.sh
+MERGE.md
+QUICK-MERGE.txt
